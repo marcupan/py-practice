@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ post.title }}{% endblock %}
+
+{% block content %}
+<article class="post">
+    <h1>{{ post.title }}</h1>
+    <p class="post-meta">Автор: {{ post.author }} | Дата: {{ post.date }}</p>
+    <hr>
+    <div>
+        {{ post.content | safe }}
+    </div>
+</article>
+
+<hr>
+<a href="{{ url_for('index') }}">&larr; Повернутися до списку постів</a>
+{% endblock %}

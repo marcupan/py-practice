@@ -1,0 +1,59 @@
+Крок 1: Діагностика (тест без GPU)
+Це найважливіший крок, щоб зрозуміти, де саме криється проблема. Ми спробуємо встановити TensorFlow для роботи лише на CPU, без плагіна для графічного процесора (tensorflow-metal).
+
+Повністю видаліть попереднє середовище, щоб почати з чистого аркуша:
+
+Bash
+
+conda deactivate
+conda env remove -n tf_m3_env
+# Якщо ви створювали інші середовища, видаліть і їх
+# conda env remove -n tf_clean_env
+Створіть нове, чисте середовище для CPU-тесту:
+
+Bash
+
+conda create --name tf_cpu_test python=3.10
+conda activate tf_cpu_test
+Встановіть залежності та TensorFlow для CPU:
+
+Bash
+
+conda install -c apple tensorflow-deps
+python -m pip install tensorflow-macos
+# ЗВЕРНІТЬ УВАГУ: ми НЕ встановлюємо tensorflow-metal!
+Встановіть NumPy (про всяк випадок):
+
+Bash
+
+python -m pip install numpy
+Запустіть тестовий скрипт test_tf.py знову:
+Переконайтеся, що ви знаходитесь в активованому середовищі tf_cpu_test, і виконайте:
+
+Bash
+
+python test_tf.py
+Оцінка результату:
+
+Якщо цей скрипт ВІДПРАЦЮВАВ успішно: Вітаю! Ми точно знаємо, що проблема у плагіні tensorflow-metal. Це означає, що tensorflow-macos працює коректно, але виникає конфлікт при спробі задіяти GPU. У такому разі переходьте до Кроку 2.
+Якщо цей скрипт ЗНОВУ ВИКЛИКАВ abort: Проблема глибше, в самій базі tensorflow-macos або його основних залежностях (tensorflow-deps). Це менш імовірно, але можливо.
+Крок 2: Перевстановлення з GPU (якщо Крок 1 був успішним)
+Якщо версія для CPU запрацювала, значить проблема в tensorflow-metal. Спробуємо встановити його ще раз у тому ж середовищі tf_cpu_test.
+
+Переконайтеся, що ви в середовищі tf_cpu_test:
+
+Bash
+
+conda activate tf_cpu_test
+Встановіть tensorflow-metal та інші бібліотеки:
+
+Bash
+
+python -m pip install tensorflow-metal
+python -m pip install matplotlib seaborn pandas
+Знову запустіть тестовий скрипт test_tf.py. Якщо він впаде, проблема саме в сумісності версій tensorflow-metal. Іноді допомагає встановлення трохи старішої, стабільної версії, наприклад:
+
+Bash
+
+# Спробувати, якщо остання версія не працює
+python -m pip install tensorflow-metal==1.1.0
