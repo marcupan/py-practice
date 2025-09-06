@@ -47,13 +47,13 @@ print("\n--- 3. Базове очищення даних ---")
 # Заповнимо пропуски медіанним значенням віку
 # Медіана менш чутлива до викидів, ніж середнє
 median_age = df['Age'].median()
-df['Age'].fillna(median_age, inplace=True)
+df['Age'] = df['Age'].fillna(median_age)
 print(f"\nПропущені значення в 'Age' заповнено медіаною ({median_age:.2f}).")
 
 # Обробка пропущених значень в 'Embarked'
 # Тут лише 2 пропуски. Заповнимо їх найчастішим значенням (модою).
 most_frequent_embarked = df['Embarked'].mode()[0]  # mode() повертає Series, беремо перший елемент
-df['Embarked'].fillna(most_frequent_embarked, inplace=True)
+df['Embarked'] = df['Embarked'].fillna(most_frequent_embarked)
 print(f"Пропущені значення в 'Embarked' заповнено модою ('{most_frequent_embarked}').")
 
 # Колонка 'Cabin' має занадто багато пропусків.
@@ -74,7 +74,7 @@ sns.set_theme(style="whitegrid")
 
 # 4.1 Аналіз виживання (Survived) - цільова змінна
 plt.figure(figsize=(6, 4))
-sns.countplot(x='Survived', data=df, palette='viridis')
+sns.countplot(x='Survived', data=df)
 plt.title('Розподіл пасажирів за виживанням (0 = Загинув, 1 = Вижив)')
 plt.xlabel('Статус виживання')
 plt.ylabel('Кількість пасажирів')
@@ -156,7 +156,7 @@ plt.show()
 
 # 4.8 Взаємозв'язок між класом каюти та віком
 plt.figure(figsize=(9, 6))
-sns.boxplot(x='Pclass', y='Age', data=df, palette='coolwarm')
+sns.boxplot(x='Pclass', y='Age', data=df)
 plt.title('Розподіл віку пасажирів за класом каюти')
 plt.xlabel('Клас каюти')
 plt.ylabel('Вік (роки)')

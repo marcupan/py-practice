@@ -1,0 +1,9 @@
+# Project-wide Python dependencies
+# Notes:
+# - On Windows with Python 3.14, official wheels may not yet be available for some packages (e.g., pandas).
+#   If installation fails, see README.md for recommended workarounds (use Python 3.12 venv, Conda, or Build Tools).
+
+numpy>=2.1
+pandas>=2.2
+matplotlib>=3.8
+seaborn>=0.13
