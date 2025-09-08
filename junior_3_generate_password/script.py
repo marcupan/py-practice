@@ -1,10 +1,12 @@
-import random  # Модуль для генерації випадкових елементів
+import secrets  # Більш безпечний генератор випадкових значень
 import string  # Модуль, що містить корисні рядкові константи
 
 
 def generate_password(length, use_uppercase, use_digits, use_symbols):
     """
     Генерує випадковий пароль заданої довжини та складності.
+
+    Гарантує принаймні один символ з кожної обраної категорії.
 
     Args:
       length (int): Бажана довжина пароля.
@@ -16,30 +18,43 @@ def generate_password(length, use_uppercase, use_digits, use_symbols):
       str: Згенерований пароль.
     """
 
-    # Визначаємо базовий набір символів (малі літери завжди включені)
-    character_pool = list(string.ascii_lowercase)  # list() для можливості змінювати список
+    # Категорії символів
+    lower = list(string.ascii_lowercase)  # Малі літери завжди включені
+    upper = list(string.ascii_uppercase) if use_uppercase else []
+    digits = list(string.digits) if use_digits else []
+    symbols = list(string.punctuation) if use_symbols else []
 
-    # Додаємо інші набори символів до пулу, якщо користувач їх вибрав
+    # Підрахунок обов'язкових категорій (ті, що вибрані) + lowercase
+    required_sets = [lower]
     if use_uppercase:
-        character_pool.extend(list(string.ascii_uppercase))  # Додаємо великі літери
+        required_sets.append(upper)
     if use_digits:
-        character_pool.extend(list(string.digits))  # Додаємо цифри
+        required_sets.append(digits)
     if use_symbols:
-        # Додаємо стандартний набір символів пунктуації
-        character_pool.extend(list(string.punctuation))
+        required_sets.append(symbols)
 
-    # Перемішуємо пул символів для кращої випадковості (опціонально, але рекомендується)
-    random.shuffle(character_pool)
+    # Перевірка довжини: має бути не меншою за кількість обов'язкових категорій
+    if length < len(required_sets):
+        raise ValueError(
+            f"Довжина пароля замала. Мінімум: {len(required_sets)}, задано: {length}."
+        )
 
-    # Генеруємо пароль, випадково вибираючи символи з підготовленого пулу
-    # random.choices() дозволяє вибирати кілька елементів зі списку (з можливістю повторень)
-    # 'k=length' вказує, скільки символів потрібно вибрати
-    password_list = random.choices(character_pool, k=length)
+    # Побудова пулу символів для решти виборів
+    character_pool = lower + upper + digits + symbols
 
-    # Об'єднуємо список символів в один рядок
-    password = "".join(password_list)
+    # Формуємо початковий список, гарантуючи наявність кожної категорії
+    password_chars = [secrets.choice(char_set) for char_set in required_sets]
 
-    return password
+    # Дозаповнюємо до потрібної довжини з повного пулу
+    remaining = length - len(password_chars)
+    password_chars.extend(secrets.choice(character_pool) for _ in range(remaining))
+
+    # Перемішуємо результуючий список символів безпечно
+    for i in range(len(password_chars) - 1, 0, -1):  # Fisher–Yates
+        j = secrets.randbelow(i + 1)
+        password_chars[i], password_chars[j] = password_chars[j], password_chars[i]
+
+    return "".join(password_chars)
 
 
 # Основна частина програми для взаємодії з користувачем
@@ -78,9 +93,13 @@ if __name__ == "__main__":
     include_symbols = ask_yes_no(f"Включати спеціальні символи ({string.punctuation})?")
 
     # Генеруємо пароль за допомогою нашої функції
-    generated_password = generate_password(password_length, include_uppercase, include_digits, include_symbols)
-
-    # Виводимо згенерований пароль
-    print("-" * 30)
-    print(f"Ваш згенерований пароль: {generated_password}")
-    print("-" * 30)
+    try:
+        generated_password = generate_password(password_length, include_uppercase, include_digits, include_symbols)
+    except ValueError as e:
+        # Наприклад, коли довжина менша за кількість вибраних категорій
+        print(f"Помилка: {e}")
+    else:
+        # Виводимо згенерований пароль
+        print("-" * 30)
+        print(f"Ваш згенерований пароль: {generated_password}")
+        print("-" * 30)
