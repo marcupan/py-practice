@@ -63,26 +63,29 @@ if __name__ == "__main__":
     print("-" * 30)
 
     # Отримуємо бажану довжину пароля від користувача
+    password_length = 12  # Ініціалізація за замовчуванням, щоб уникнути 'може бути не визначено'
     while True:  # Цикл для перевірки коректності вводу довжини
+        password_length_str = input("Введіть бажану довжину пароля (Enter = 12): ").strip()
+        password_length_str = password_length_str or "12"  # Якщо пустий, стає "12"
+
         try:
-            password_length_str = input("Введіть бажану довжину пароля (наприклад, 12): ")
             password_length = int(password_length_str)
             if password_length <= 0:
-                print("Довжина пароля повинна бути позитивним числом.")
-            else:
-                break  # Виходимо з циклу, якщо довжина коректна
+                print("Довжина має бути додатним числом!")
+                continue
+            break  # валідне значення отримане, виходимо з циклу
         except ValueError:
-            print("Будь ласка, введіть дійсне ціле число для довжини.")
-
+            print("Невірний формат числа!")
+            continue
 
     # Запитуємо користувача про використання різних типів символів
     # Функція для спрощення запиту так/ні
     def ask_yes_no(prompt):
         while True:
             answer = input(f"{prompt} (так/ні): ").lower().strip()
-            if answer in ['так', 'т']:
+            if answer in ['так', 'т', 'yes', 'y', '+']:
                 return True
-            elif answer in ['ні', 'н']:
+            elif answer in ['ні', 'н', 'no', 'n', '-']:
                 return False
             else:
                 print("Будь ласка, введіть 'так' або 'ні'.")
