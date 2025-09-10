@@ -5,6 +5,15 @@ import os  # Модуль для взаємодії з операційною с
 TASKS_FILE = "tasks.json"
 
 
+def is_yes(answer: str) -> bool:
+    """Повертає True, якщо відповідь користувача означає «так».
+    Підтримує декілька поширених варіантів: "так", "y", "yes", "т".
+    """
+    if not isinstance(answer, str):
+        return False
+    return answer.strip().lower() in {"так", "y", "yes", "т"}
+
+
 def load_tasks():
     """Завантажує список завдань із файлу JSON."""
     # Перевіряємо, чи існує файл
@@ -34,13 +43,21 @@ def load_tasks():
 
 
 def save_tasks(tasks):
-    """Зберігає поточний список завдань у файл JSON."""
+    """Зберігає поточний список завдань у файл JSON атомарно (через тимчасовий файл)."""
     try:
-        # Відкриваємо файл для запису (перезаписуємо існуючий)
-        # indent=4 робить JSON файл більш читабельним (з відступами)
-        # ensure_ascii=False дозволяє коректно зберігати кирилицю
-        with open(TASKS_FILE, 'w', encoding='utf-8') as f:
+        temp_path = TASKS_FILE + ".tmp"
+        # Записуємо у тимчасовий файл
+        with open(temp_path, 'w', encoding='utf-8') as f:
             json.dump(tasks, f, indent=4, ensure_ascii=False)
+            # Гарантуємо запис на диск перед заміною
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except Exception:
+                # На деяких платформах fsync може бути недоступний/непотрібний
+                pass
+        # Атомарно замінюємо основний файл
+        os.replace(temp_path, TASKS_FILE)
     except Exception as e:
         # Обробка можливих помилок запису
         print(f"Помилка при збереженні завдань: {e}")
@@ -101,8 +118,8 @@ def mark_task_done(tasks):
         except ValueError:
             print("Будь ласка, введіть дійсний номер.")
         # Запитуємо чи користувач хоче спробувати ще раз, якщо був невірний номер
-        try_again = input("Спробувати ввести номер ще раз? (так/ні): ").lower()
-        if try_again != 'так':
+        try_again = input("Спробувати ввести номер ще раз? (так/ні): ")
+        if not is_yes(try_again):
             break  # Виходимо з циклу запиту номера
     return False  # Якщо не вдалося позначити завдання
 
@@ -121,8 +138,8 @@ def delete_task(tasks):
                 task_index = task_num - 1
                 # Запитуємо підтвердження перед видаленням
                 confirm = input(
-                    f"Ви впевнені, що хочете видалити завдання \"{tasks[task_index]['description']}\"? (так/ні): ").lower()
-                if confirm == 'так':
+                    f"Ви впевнені, що хочете видалити завдання \"{tasks[task_index]['description']}\"? (так/ні): ")
+                if is_yes(confirm):
                     # Видаляємо завдання за індексом
                     deleted_task = tasks.pop(task_index)
                     print(f"Завдання \"{deleted_task['description']}\" успішно видалено.")
@@ -135,8 +152,8 @@ def delete_task(tasks):
         except ValueError:
             print("Будь ласка, введіть дійсний номер.")
         # Запитуємо чи користувач хоче спробувати ще раз
-        try_again = input("Спробувати ввести номер ще раз? (так/ні): ").lower()
-        if try_again != 'так':
+        try_again = input("Спробувати ввести номер ще раз? (так/ні): ")
+        if not is_yes(try_again):
             break  # Виходимо з циклу запиту номера
     return False  # Якщо не вдалося видалити
 
@@ -171,6 +188,8 @@ def main():
             if delete_task(tasks):
                 needs_saving = True
         elif choice == '5':
+            # На виході зберігаємо поточний стан завдань
+            save_tasks(tasks)
             print("Дякуємо за використання! Зміни збережено.")
             break  # Виходимо з головного циклу
         else:
