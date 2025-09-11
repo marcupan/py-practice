@@ -1,6 +1,28 @@
 import requests  # Бібліотека для здійснення HTTP-запитів
-import json  # Бібліотека для роботи з JSON (хоча requests.json() часто достатньо)
-import datetime  # Для можливого перетворення часу (наприклад, схід/захід сонця)
+import json  # Бібліотека для роботи з JSON
+import datetime  # Для можливого перетворення часу
+import os  # Для читання змінних середовища
+from typing import Optional
+
+
+def is_yes(answer: str) -> bool:
+    """Повертає True, якщо відповідь користувача означає «так».
+    Підтримує декілька поширених варіантів: "так", "y", "yes", "т".
+    """
+    if not isinstance(answer, str):
+        return False
+    return answer.strip().lower() in {"так", "y", "yes", "т"}
+
+
+def get_api_key() -> Optional[str]:
+    """Повертає API ключ з середовища або запиту користувача.
+    Спочатку читає змінну середовища OPENWEATHER_API_KEY, інакше пропонує ввести вручну.
+    """
+    api_key = os.getenv("OPENWEATHER_API_KEY")
+    if api_key:
+        return api_key.strip()
+    api_key = input("Введіть ваш API ключ OpenWeatherMap: ").strip()
+    return api_key or None
 
 
 # --- Функція для отримання та відображення погоди ---
@@ -32,7 +54,7 @@ def get_weather_forecast(api_key, city_name):
 
     try:
         # Виконуємо GET-запит до API
-        response = requests.get(base_url, params=params)
+        response = requests.get(base_url, params=params, timeout=10)
         # Перевіряємо статус-код відповіді
         response.raise_for_status()  # Генерує помилку HTTPError для поганих статусів (4xx або 5xx)
 
@@ -60,6 +82,23 @@ def get_weather_forecast(api_key, city_name):
         if pressure_hpa is not None:
             pressure_mmhg = round(pressure_hpa * 0.750062)
 
+        # --- Додаткові поля ---
+        clouds = weather_data.get('clouds', {}).get('all')  # % хмарності
+        timezone_shift = weather_data.get('timezone', 0)
+        sunrise_ts = sys_data.get('sunrise')
+        sunset_ts = sys_data.get('sunset')
+
+        def fmt_time(ts):
+            try:
+                base = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc)
+                local_dt = base + datetime.timedelta(seconds=timezone_shift)
+                return local_dt.strftime('%Y-%m-%d %H:%M')
+            except Exception:
+                return None
+
+        sunrise_str = fmt_time(sunrise_ts) if sunrise_ts else None
+        sunset_str = fmt_time(sunset_ts) if sunset_ts else None
+
         # --- Форматуємо та виводимо результат ---
         print("\n--- Погода ---")
         print(f"Місто: {city}, {country}")
@@ -67,15 +106,21 @@ def get_weather_forecast(api_key, city_name):
 
         # Виводимо дані, лише якщо вони існують
         if temp is not None:
-            print(f"Температура: {temp}°C")
+            print(f"Температура: {round(temp, 1)}°C")
         if feels_like is not None:
-            print(f"Відчувається як: {feels_like}°C")
+            print(f"Відчувається як: {round(feels_like, 1)}°C")
         if humidity is not None:
             print(f"Вологість: {humidity}%")
         if pressure_mmhg is not None:
             print(f"Тиск: {pressure_mmhg} мм рт. ст.")
         if wind_speed is not None:
             print(f"Швидкість вітру: {wind_speed} м/с")
+        if clouds is not None:
+            print(f"Хмарність: {clouds}%")
+        if sunrise_str:
+            print(f"Схід сонця: {sunrise_str}")
+        if sunset_str:
+            print(f"Захід сонця: {sunset_str}")
         print("-" * 14 + "\n")
 
     except requests.exceptions.HTTPError as http_err:
@@ -104,29 +149,33 @@ def get_weather_forecast(api_key, city_name):
 
 
 # --- Основна частина програми ---
-if __name__ == "__main__":
+
+def main():
     print("Програма прогнозу погоди")
     print("Для роботи потрібен API ключ від OpenWeatherMap (openweathermap.org)")
     print("Безкоштовний ключ можна отримати після реєстрації на сайті.")
 
-    # Отримуємо API ключ від користувача
-    # ВАЖЛИВО: Не зберігайте API ключ безпосередньо в коді для реальних програм!
-    # Краще використовувати змінні середовища або конфігураційні файли.
-    api_key = input("Введіть ваш API ключ OpenWeatherMap: ").strip()
+    # Отримуємо API ключ (зі змінної середовища або запитуємо)
+    api_key = get_api_key()
 
     if not api_key:
         print("API ключ не введено. Завершення програми.")
-    else:
-        # Головний цикл програми
-        while True:
-            city = input("Введіть назву міста (або 'вихід' для завершення): ").strip()
-            if city.lower() == 'вихід':
-                break  # Вихід з циклу, якщо користувач ввів 'вихід'
-            if not city:
-                print("Назва міста не може бути порожньою.")
-                continue  # Пропускаємо ітерацію і запитуємо знову
+        return
 
-            # Викликаємо функцію для отримання погоди
-            get_weather_forecast(api_key, city)
+    # Головний цикл програми
+    while True:
+        city = input("Введіть назву міста (або 'exit' для завершення): ").strip()
+        if city.lower() == 'exit':
+            break  # Вихід з циклу, якщо користувач ввів 'exit'
+        if not city:
+            print("Назва міста не може бути порожньою.")
+            continue  # Пропускаємо ітерацію і запитуємо знову
+
+        # Викликаємо функцію для отримання погоди
+        get_weather_forecast(api_key, city)
 
     print("\nДякуємо за використання програми!")
+
+
+if __name__ == "__main__":
+    main()
