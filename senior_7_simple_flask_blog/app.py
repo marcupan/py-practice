@@ -1,86 +1,104 @@
-from flask import Flask, render_template, abort
-import datetime  # Імпортуємо модуль datetime для відображення поточного часу
+from __future__ import annotations
 
-# Створюємо екземпляр додатку Flask
-# __name__ допомагає Flask знайти шаблони та статичні файли
-app = Flask(__name__)
+import os
+from datetime import datetime, timezone
+from typing import Any, Dict, Iterable, Optional, Tuple
+
+from flask import Flask, abort, render_template
+
+
+def _now_iso() -> str:
+    """Return current UTC time in ISO-like format suitable for display.
+
+    Using timezone-aware UTC time makes behavior predictable across environments.
+    """
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+class Config:
+    """Base configuration for the Flask app.
+
+    DEBUG can be toggled via the environment variable FLASK_DEBUG (0/1/true/false).
+    """
+
+    DEBUG: bool = os.getenv("FLASK_DEBUG", "1").lower() in {"1", "true", "yes"}
+
 
 # --- Дані для нашого блогу/портфоліо (замість бази даних) ---
-# Список словників, де кожен словник представляє пост
-POSTS = [
+# Список словників, де кожен словник представляє пост. Робимо кортеж для
+# імунтабельності на рівні модуля (мінімізуємо випадкові зміни глобального стану).
+POSTS: Tuple[Dict[str, Any], ...] = (
     {
-        'id': 1,
-        'title': 'Мій перший пост!',
-        'content': 'Це тіло мого першого поста в блозі. Ласкаво просимо!',
-        'author': 'Адміністратор',
-        'date': '2025-04-10'
+        "id": 1,
+        "title": "Мій перший пост!",
+        "content": "Це контент мого першого поста в блозі. Ласкаво просимо!",
+        "author": "Адміністратор",
+        "date": "2025-04-10",
     },
     {
-        'id': 2,
-        'title': 'Знайомство з Flask',
-        'content': 'Flask - це чудовий мікрофреймворк для створення веб-додатків на Python. Він простий та гнучкий.',
-        'author': 'Розробник',
-        'date': '2025-04-11'
+        "id": 2,
+        "title": "Знайомство з Flask",
+        "content": "Flask - це чудовий мікрофреймворк для створення веб-додатків на Python. Він простий та гнучкий.",
+        "author": "Розробник",
+        "date": "2025-04-11",
     },
     {
-        'id': 3,
-        'title': 'Проект Портфоліо',
-        'content': 'Тут може бути опис вашого проекту портфоліо, технології, які використовувались, та посилання.',
-        'author': 'Я',
-        'date': '2025-04-12'
-    }
-]
+        "id": 3,
+        "title": "Проект Портфоліо",
+        "content": "Тут може бути опис вашого проекту портфоліо, технології, які використовувались, та посилання.",
+        "author": "Я",
+        "date": "2025-04-12",
+    },
+)
 
 
-# --- Кінець даних ---
+def create_app(config: Optional[type[Config]] = None) -> Flask:
+    """Application factory following Flask best practices.
 
-# --- Маршрути (Routes) та функції-обробники (View Functions) ---
+    This allows other tools (tests, WSGI servers) to create the app
+    without executing module-level side effects.
+    """
+    app = Flask(__name__)
+    app.config.from_object(config or Config)
 
-# Маршрут для головної сторінки ('/')
-@app.route('/')
-def index():
-    """Обробник для головної сторінки. Показує список постів."""
-    # Передаємо список POSTS у шаблон index.html
-    # Також додамо поточний час для демонстрації в base.html
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    return render_template('index.html', posts=POSTS, current_time=current_time)
+    # --- Маршрути (Routes) та функції-обробники (View Functions) ---
 
+    @app.route("/")
+    def index():
+        """Обробник для головної сторінки. Показує список постів."""
+        current_time = _now_iso()
+        return render_template("index.html", posts=list(POSTS), current_time=current_time)
 
-# Маршрут для сторінки "Про мене" ('/about')
-@app.route('/about')
-def about():
-    """Обробник для сторінки 'Про мене'."""
-    # Просто відображаємо статичний шаблон about.html
-    # Також передаємо поточний час
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    return render_template('about.html', current_time=current_time)
+    @app.route("/about")
+    def about():
+        """Обробник для сторінки 'Про мене'."""
+        current_time = _now_iso()
+        return render_template("about.html", current_time=current_time)
 
+    @app.route("/post/<int:post_id>")
+    def show_post(post_id: int):
+        """Обробник для відображення окремого поста."""
+        post = next((p for p in POSTS if p["id"] == post_id), None)
+        if post is None:
+            abort(404)
+        current_time = _now_iso()
+        return render_template("post.html", post=post, current_time=current_time)
 
-# Маршрут для перегляду окремого поста за його ID ('/post/<id>')
-# <int:post_id> - це змінна частина URL, яка очікує ціле число (id поста)
-@app.route('/post/<int:post_id>')
-def show_post(post_id):
-    """Обробник для відображення окремого поста."""
-    # Шукаємо пост з відповідним ID у нашому списку POSTS
-    # next() з None для уникнення помилки, якщо пост не знайдено
-    post = next((p for p in POSTS if p['id'] == post_id), None)
+    # Error handlers
+    @app.errorhandler(404)
+    def not_found(error):  # type: ignore[unused-argument]
+        # Спробуємо показати дружню сторінку 404, якщо вона є; інакше - текст за замовчуванням
+        try:
+            return render_template("404.html"), 404
+        except Exception:
+            return "404 Not Found", 404
 
-    if post is None:
-        # Якщо пост з таким ID не знайдено, повертаємо помилку 404 Not Found
-        abort(404)
-
-    # Якщо пост знайдено, передаємо його у шаблон post.html
-    # Також передаємо поточний час
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    return render_template('post.html', post=post, current_time=current_time)
+    return app
 
 
 # --- Запуск додатку ---
 # Цей блок виконується, лише якщо файл запускається напряму (python app.py)
-if __name__ == '__main__':
-    # app.run() запускає локальний сервер для розробки
-    # debug=True вмикає режим налагодження:
-    # - Автоматичне перезавантаження сервера при зміні коду
-    # - Детальні повідомлення про помилки в браузері
-    # ВАЖЛИВО: Ніколи не використовуйте debug=True в робочому (production) середовищі!
-    app.run(debug=True)
+if __name__ == "__main__":
+    app = create_app()
+    # ВАЖЛИВО: Не використовуйте DEBUG=True у production. Керуйте через FLASK_DEBUG.
+    app.run(debug=bool(app.config.get("DEBUG", False)))

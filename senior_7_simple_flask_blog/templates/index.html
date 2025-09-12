@@ -1,43 +1,27 @@
-{% extends 'base.html' %} {% block title %}Головна - Мій Блог/Портфоліо{% endblock %} {% block content %} <h1>Вітаємо на
-    нашому сайті!</h1>
+{% extends 'base.html' %}
+
+{% block title %}Головна - Мій Блог/Портфоліо{% endblock %}
+
+{% block content %}
+<h1>Вітаємо на нашому сайті!</h1>
 <p>Тут ви знайдете останні пости блогу або приклади робіт.</p>
 
 <hr>
 
 <h2>Останні пости:</h2>
-{% if posts %} {% for post in posts %}
-<article class="post">
-    <h2>
-        <a href="{{ url_for('show_post', post_id=post.id) }}">{{ post.title }}</a>
-    </h2>
-    <p class="post-meta">Автор: {{ post.author }} | Дата: {{ post.date }}</p>
-    <p>{{ post.content[:200] }}{% if post.content|length > 200 %}...{% endif %}</p>
-    <a href="{{ url_for('show_post', post_id=post.id) }}">Читати далі &rarr;</a>
-</article>
-{% endfor %}
+{% if posts %}
+    {% for post in posts %}
+    <article class="post">
+        <h2>
+            <a href="{{ url_for('show_post', post_id=post.id) }}">{{ post.title }}</a>
+        </h2>
+        <p class="post-meta">Автор: {{ post.author }} | Дата: {{ post.date }}</p>
+        <p>{{ post.content[:200] }}{% if post.content|length > 200 %}...{% endif %}</p>
+        <a href="{{ url_for('show_post', post_id=post.id) }}">Читати далі &rarr;</a>
+    </article>
+    {% endfor %}
 {% else %}
 <p>Поки що немає жодного поста.</p>
 {% endif %}
 
-{% endblock %} ```
-
-**`templates/about.html`:**
-
-```html
-{% extends 'base.html' %}
-
-{% block title %}Про мене{% endblock %}
-
-{% block content %}
-<h1>Про мене</h1>
-<p>
-    Привіт! Мене звати [Ваше Ім'я].
-</p>
-<p>
-    Я [Ваша Професія/Роль], і це мій простий блог/портфоліо, створений за допомогою Flask.
-    Тут я планую ділитися [Теми блогу] або демонструвати [Типи робіт у портфоліо].
-</p>
-<p>
-    Дякую, що завітали!
-</p>
 {% endblock %}
