@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import sys
 
 # Імпорти з бібліотеки aiogram
@@ -13,12 +14,11 @@ from aiogram.types import Message
 # --- Конфігурація ---
 # ВАЖЛИВО: НІКОЛИ не зберігайте токен прямо в коді для реальних проектів!
 # Краще використовувати змінні середовища або файли конфігурації.
-BOT_TOKEN = "YOUR_BOT_TOKEN"  # !!! ЗАМІНІТЬ НА ВАШ СПРАВЖНІЙ ТОКЕН !!!
+# Спробуємо прочитати токен з TELEGRAM_BOT_TOKEN або BOT_TOKEN
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN")
 
-# --- Ініціалізація Бота та Диспетчера ---
-# Створюємо екземпляр Бота. parse_mode=ParseMode.HTML дозволяє використовувати HTML-теги для форматування тексту.
-bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
-# Створюємо екземпляр Диспетчера. Він відповідає за обробку повідомлень.
+# --- Ініціалізація Диспетчера ---
+# Диспетчер відповідає за обробку повідомлень.
 dp = Dispatcher()
 
 
@@ -85,10 +85,30 @@ async def main() -> None:
     """
     Асинхронна функція запуску бота та обробки повідомлень.
     """
-    # Починаємо процес отримання оновлень від Telegram (polling)
-    # skip_updates=True - ігнорувати повідомлення, що накопичились, поки бот був вимкнений
-    print("Запускаю бота...")
-    await dp.start_polling(bot, skip_updates=True)
+    token = BOT_TOKEN
+    if not token or token.strip().upper() == "YOUR_BOT_TOKEN":
+        logging.error(
+            "Не задано токен бота. Встановіть змінну середовища TELEGRAM_BOT_TOKEN або BOT_TOKEN."
+        )
+        return
+
+    bot = Bot(token=token, parse_mode=ParseMode.HTML)
+
+    logging.info("Запускаю бота (polling)...")
+    try:
+        # Починаємо процес отримання оновлень від Telegram (polling)
+        # skip_updates=True - ігнорувати повідомлення, що накопичились, поки бот був вимкнений
+        await dp.start_polling(bot, skip_updates=True)
+    except asyncio.CancelledError:
+        # Нормальне завершення при зупинці
+        logging.info("Polling було перервано (cancelled)")
+        raise
+    except Exception as e:
+        logging.error(f"Помилка під час роботи бота: {e}", exc_info=True)
+        raise
+    finally:
+        await bot.session.close()
+        logging.info("Сесію бота закрито. Завершення роботи.")
 
 
 # --- Точка входу в програму ---
