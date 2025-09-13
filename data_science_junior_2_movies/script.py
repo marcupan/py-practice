@@ -4,29 +4,41 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import json  # Для роботи з JSON-даними в колонках
 import ast  # Для безпечного перетворення рядка JSON у словник/список
+from pathlib import Path
+import os
 
 print("Бібліотеки pandas, numpy, matplotlib, seaborn, json, ast імпортовано.")
 
 # --- 1. Завантаження та об'єднання даних ---
-movies_file_path = 'tmdb_5000_movies.csv'
-credits_file_path = 'tmdb_5000_credits.csv'
+BASE_DIR = Path(__file__).resolve().parent
+movies_file_path = BASE_DIR / 'tmdb_5000_movies.csv'
+credits_file_path = BASE_DIR / 'tmdb_5000_credits.csv'
+outputs_dir = BASE_DIR / 'outputs'
+outputs_dir.mkdir(exist_ok=True)
 
 try:
     movies_df = pd.read_csv(movies_file_path)
     credits_df = pd.read_csv(credits_file_path)
-    print(f"Дані успішно завантажено з '{movies_file_path}' та '{credits_file_path}'.")
+    print(f"Дані успішно завантажено з '{movies_file_path.name}' та '{credits_file_path.name}'.")
 except FileNotFoundError:
-    print(f"Помилка: Один або обидва файли не знайдено.")
-    print(
-        "Будь ласка, завантажте tmdb_5000_movies.csv та tmdb_5000_credits.csv з Kaggle і помістіть їх в папку зі скриптом.")
-    exit()  # Вихід, якщо файли не знайдено
+    print("Помилка: Один або обидва файли не знайдено.")
+    print("Будь ласка, завантажте tmdb_5000_movies.csv та tmdb_5000_credits.csv з Kaggle і помістіть їх в папку зі скриптом.")
+    raise
 
 # Перейменуємо колонку для об'єднання в credits_df для ясності
 credits_df.rename(columns={'movie_id': 'id'}, inplace=True)
 
 # Об'єднаємо два датафрейми за колонкою 'id'
-df = movies_df.merge(credits_df, on='id')
+df = movies_df.merge(credits_df, on='id', suffixes=('_movies', '_credits'))
 print(f"Датафрейми об'єднано. Загальна кількість фільмів: {df.shape[0]}, колонок: {df.shape[1]}")
+
+# Нормалізуємо назву фільму до однієї колонки 'title'
+if 'title_movies' in df.columns:
+    df['title'] = df['title_movies']
+elif 'title' in df.columns:
+    df['title'] = df['title']
+else:
+    df['title'] = np.nan
 
 # --- 2. Початкове дослідження об'єднаних даних ---
 print("\n--- 2. Початкове дослідження даних ---")
@@ -84,24 +96,31 @@ def parse_json_list(data_str):
 df['genres_list'] = df['genres'].apply(parse_json_list)
 print("Розпарсено колонку 'genres' у список назв жанрів ('genres_list').")
 print("Приклад розпарсених жанрів:")
-print(df[['title_x', 'genres_list']].head(3))
+print(df[['title', 'genres_list']].head(3))
 
 # --- 4. EDA та Візуалізація ---
 print("\n--- 4. EDA та Візуалізація ---")
-print("Зараз будуть відкриватися вікна з графіками...")
+print(f"Графіки будуть збережені в папку: {outputs_dir}")
 
 sns.set_theme(style="whitegrid")
 
 # 4.1 Найпопулярніші жанри
-all_genres = df['genres_list'].explode()
+all_genres = df['genres_list'].explode().dropna()
 plt.figure(figsize=(12, 8))
-# ВИПРАВЛЕНО: Використано .values для уникнення помилки з дубльованими індексами
-sns.countplot(y=all_genres.values, order=all_genres.value_counts().index, palette='mako')
+# Щоб уникнути FutureWarning у seaborn (palette без hue), використовуємо hue та вимикаємо легенду
+genres_df = pd.DataFrame({'genre': all_genres})
+order = genres_df['genre'].value_counts().index
+ax = sns.countplot(data=genres_df, y='genre', order=order, hue='genre', palette='mako', legend=False)
+# Для сумісності з версіями seaborn без параметра legend — видаляємо легенду вручну, якщо вона є
+if hasattr(ax, 'legend_') and ax.legend_:
+    ax.legend_.remove()
 plt.title('Найпопулярніші жанри фільмів')
 plt.xlabel('Кількість фільмів')
 plt.ylabel('Жанр')
 plt.tight_layout()
-plt.show()
+plt.savefig(outputs_dir / '01_top_genres.png', dpi=150)
+plt.close()
+print(f"Збережено графік: {outputs_dir / '01_top_genres.png'}")
 
 # 4.2 Розподіл рейтингів фільмів (vote_average)
 plt.figure(figsize=(10, 6))
@@ -110,7 +129,9 @@ plt.title('Розподіл середніх рейтингів фільмів (
 plt.xlabel('Середній рейтинг (0-10)')
 plt.ylabel('Кількість фільмів')
 plt.tight_layout()
-plt.show()
+plt.savefig(outputs_dir / '02_vote_average_hist.png', dpi=150)
+plt.close()
+print(f"Збережено графік: {outputs_dir / '02_vote_average_hist.png'}")
 
 # 4.3 Розподіл тривалості фільмів (runtime)
 plt.figure(figsize=(10, 6))
@@ -119,7 +140,9 @@ plt.title('Розподіл тривалості фільмів (хвилини)
 plt.xlabel('Тривалість (хв)')
 plt.ylabel('Кількість фільмів')
 plt.tight_layout()
-plt.show()
+plt.savefig(outputs_dir / '03_runtime_hist.png', dpi=150)
+plt.close()
+print(f"Збережено графік: {outputs_dir / '03_runtime_hist.png'}")
 
 # 4.4 Кількість фільмів за роком виходу
 plt.figure(figsize=(14, 7))
@@ -131,7 +154,9 @@ plt.xlabel('Рік виходу')
 plt.ylabel('Кількість фільмів')
 plt.grid(True)
 plt.tight_layout()
-plt.show()
+plt.savefig(outputs_dir / '04_movies_per_year.png', dpi=150)
+plt.close()
+print(f"Збережено графік: {outputs_dir / '04_movies_per_year.png'}")
 
 # 4.5 Залежність доходу від бюджету (Revenue vs Budget)
 budget_revenue_df = df[(df['budget'] > 1000) & (df['revenue'] > 1000)]
@@ -141,7 +166,9 @@ plt.title('Залежність доходу від бюджету фільму 
 plt.xlabel('Бюджет ($)')
 plt.ylabel('Дохід ($)')
 plt.tight_layout()
-plt.show()
+plt.savefig(outputs_dir / '05_revenue_vs_budget.png', dpi=150)
+plt.close()
+print(f"Збережено графік: {outputs_dir / '05_revenue_vs_budget.png'}")
 
 # 4.6 Залежність рейтингу від бюджету
 plt.figure(figsize=(10, 6))
@@ -150,13 +177,15 @@ plt.title('Залежність середнього рейтингу від б�
 plt.xlabel('Бюджет ($)')
 plt.ylabel('Середній рейтинг (0-10)')
 plt.tight_layout()
-plt.show()
+plt.savefig(outputs_dir / '06_rating_vs_budget.png', dpi=150)
+plt.close()
+print(f"Збережено графік: {outputs_dir / '06_rating_vs_budget.png'}")
 
 # 4.7 Топ 10 найприбутковіших фільмів
 df['profit'] = df['revenue'] - df['budget']
 top_profit_movies = df.sort_values('profit', ascending=False).head(10)
 print("\n--- Топ 10 найприбутковіших фільмів ---")
-print(top_profit_movies[['title_x', 'profit', 'budget', 'revenue']])
+print(top_profit_movies[['title', 'profit', 'budget', 'revenue']])
 
 # 4.8 Топ 10 фільмів з найвищим рейтингом (з урахуванням кількості голосів)
 C = df['vote_average'].mean()
@@ -175,6 +204,6 @@ qualified_movies['score'] = qualified_movies.apply(weighted_rating, axis=1)
 qualified_movies = qualified_movies.sort_values('score', ascending=False)
 
 print("\n--- Топ 10 фільмів за зваженим рейтингом (враховуючи кількість голосів) ---")
-print(qualified_movies[['title_x', 'vote_count', 'vote_average', 'score']].head(10))
+print(qualified_movies[['title', 'vote_count', 'vote_average', 'score']].head(10))
 
 print("\n--- Аналіз та візуалізація даних про фільми завершені ---")
