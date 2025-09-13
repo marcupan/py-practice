@@ -1,5 +1,9 @@
+import os
+from pathlib import Path
 import pandas as pd  # Бібліотека для роботи з даними (таблиці)
-import matplotlib.pyplot as plt  # Основна бібліотека для візуалізації
+import matplotlib  # Основна бібліотека для візуалізації (бекенд налаштовується нижче)
+matplotlib.use("Agg")  # Без GUI-бекенд для середовищ без екрана (CI/сервери)
+import matplotlib.pyplot as plt
 import seaborn as sns  # Бібліотека для покращеної візуалізації (надбудова над matplotlib)
 import numpy as np  # Бібліотека для числових операцій (часто використовується pandas)
 
@@ -9,8 +13,31 @@ print("Бібліотеки успішно імпортовано.")
 # Seaborn має вбудовані набори даних для прикладів. Завантажимо 'tips'.
 # Це DataFrame бібліотеки pandas.
 print("Завантаження даних 'tips'...")
-tips_df = sns.load_dataset('tips')
-print("Дані успішно завантажено.")
+tips_df = None
+try:
+    tips_df = sns.load_dataset('tips')
+    print("Дані успішно завантажено з seaborn.")
+except Exception as e:
+    print(f"Не вдалося завантажити з seaborn: {e}")
+    local_csv = Path(__file__).parent / "tips.csv"
+    if local_csv.exists():
+        print(f"Спроба завантажити локальний файл: {local_csv}")
+        tips_df = pd.read_csv(local_csv)
+        print("Дані успішно завантажено з локального CSV.")
+    else:
+        print("Локальний файл не знайдено. Створюємо синтетичний набір даних.")
+        rng = np.random.default_rng(42)
+        size = 244  # приблизно як у tips
+        tips_df = pd.DataFrame({
+            'total_bill': rng.normal(19.8, 8.9, size).clip(3, 60),
+            'tip': rng.normal(3.0, 1.4, size).clip(0.5, 12),
+            'sex': rng.choice(['Male', 'Female'], size=size),
+            'smoker': rng.choice(['Yes', 'No'], size=size, p=[0.2, 0.8]),
+            'day': rng.choice(['Thur', 'Fri', 'Sat', 'Sun'], size=size, p=[0.2, 0.1, 0.4, 0.3]),
+            'time': rng.choice(['Lunch', 'Dinner'], size=size, p=[0.3, 0.7]),
+            'size': rng.integers(1, 6, size=size)
+        })
+        print("Синтетичні дані створено.")
 
 # --- 1. Дослідження даних (Data Exploration) ---
 print("\n--- 1. Дослідження даних ---")
@@ -43,12 +70,12 @@ print(tips_df['time'].unique())
 print("\n--- 2. Аналіз даних ---")
 
 # Розрахуємо середній розмір рахунку (total_bill) для кожного дня тижня
-average_bill_per_day = tips_df.groupby('day')['total_bill'].mean()
+average_bill_per_day = tips_df.groupby('day', observed=False)['total_bill'].mean()
 print("\nСередній рахунок по днях тижня:")
 print(average_bill_per_day)
 
 # Розрахуємо середній розмір чайових (tip) залежно від статі (sex) та факту паління (smoker)
-average_tip_by_sex_smoker = tips_df.groupby(['sex', 'smoker'])['tip'].mean().unstack()
+average_tip_by_sex_smoker = tips_df.groupby(['sex', 'smoker'], observed=False)['tip'].mean().unstack()
 # .unstack() робить таблицю зручнішою для читання
 print("\nСередні чайові за статтю та фактом паління:")
 print(average_tip_by_sex_smoker)
@@ -65,7 +92,9 @@ print(tips_df.head())
 
 # --- 3. Візуалізація даних (Data Visualization) ---
 print("\n--- 3. Візуалізація даних ---")
-print("Зараз будуть відкриватися вікна з графіками...")
+output_dir = Path(__file__).parent / "outputs"
+output_dir.mkdir(parents=True, exist_ok=True)
+print(f"Графіки будуть збережені у: {output_dir}")
 
 # Встановлюємо стиль графіків seaborn для кращого вигляду
 sns.set_theme(style="whitegrid")
@@ -76,8 +105,9 @@ sns.histplot(data=tips_df, x='total_bill', kde=True, bins=20)  # kde=True дод
 plt.title('Розподіл сум рахунків (Total Bill Distribution)')
 plt.xlabel('Сума рахунку ($)')
 plt.ylabel('Кількість')
-plt.tight_layout()  # Автоматично налаштовує поля графіка
-plt.show()  # Показує графік у окремому вікні
+plt.tight_layout()
+plt.savefig(output_dir / "01_total_bill_hist.png", dpi=150)
+plt.close()
 
 # 3.2 Діаграма розсіювання (Scatter Plot): Зв'язок між сумою рахунку та чайовими
 plt.figure(figsize=(10, 6))
@@ -89,29 +119,32 @@ plt.title('Залежність чайових від суми рахунку')
 plt.xlabel('Сума рахунку ($)')
 plt.ylabel('Чайові ($)')
 plt.tight_layout()
-plt.show()
+plt.savefig(output_dir / "02_scatter_total_bill_vs_tip.png", dpi=150)
+plt.close()
 
 # 3.3 Стовпчаста діаграма (Bar Plot): Середні чайові по днях тижня
 plt.figure(figsize=(10, 6))
 # Розрахуємо середнє значення для кожного дня перед побудовою
 # estimator=np.mean - це значення за замовчуванням, але можна вказати іншу функцію (np.median, np.sum)
 # errorbar=None вимикає показ "вусів" помилок для простоти
-sns.barplot(data=tips_df, x='day', y='tip', estimator=np.mean, errorbar=None, palette='viridis',
+sns.barplot(data=tips_df, x='day', y='tip', estimator=np.mean, errorbar=None, color='C0',
             order=['Thur', 'Fri', 'Sat', 'Sun'])  # Задаємо порядок днів
 plt.title('Середні чайові по днях тижня')
 plt.xlabel('День тижня')
 plt.ylabel('Середні чайові ($)')
 plt.tight_layout()
-plt.show()
+plt.savefig(output_dir / "03_avg_tip_by_day.png", dpi=150)
+plt.close()
 
 # 3.4 Коробковий графік (Box Plot): Розподіл відсотка чайових за часом доби
 plt.figure(figsize=(10, 6))
-sns.boxplot(data=tips_df, x='time', y='tip_percentage', palette='coolwarm')
+sns.boxplot(data=tips_df, x='time', y='tip_percentage', color='C1')
 plt.title('Розподіл відсотка чайових за часом доби (Обід/Вечеря)')
 plt.xlabel('Час доби')
 plt.ylabel('Відсоток чайових (%)')
 plt.tight_layout()
-plt.show()
+plt.savefig(output_dir / "04_tip_percentage_by_time_box.png", dpi=150)
+plt.close()
 
 # 3.5 Теплова карта (Heatmap): Кореляція між числовими змінними
 # Спочатку оберемо лише числові колонки для розрахунку кореляції
@@ -124,6 +157,7 @@ plt.figure(figsize=(10, 8))
 sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=.5)
 plt.title('Теплова карта кореляцій числових змінних')
 plt.tight_layout()
-plt.show()
+plt.savefig(output_dir / "05_correlation_heatmap.png", dpi=150)
+plt.close()
 
 print("\nАналіз та візуалізацію завершено.")
