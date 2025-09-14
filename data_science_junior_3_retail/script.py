@@ -1,39 +1,45 @@
+import os
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import datetime as dt  # Для роботи з датами та часом
 
-print("Бібліотеки pandas, numpy, matplotlib, seaborn, datetime імпортовано.")
+print("Бібліотеки os, pathlib, pandas, numpy, matplotlib, seaborn, datetime імпортовано.")
 
 # --- 1. Завантаження даних ---
-# Вкажіть правильний шлях та назву вашого файлу
-file_path = 'online-retail.xlsx'
+# Автоматичний пошук файлу поруч зі скриптом: спочатку .xlsx, потім .csv
+script_dir = Path(__file__).parent
+xlsx_path = script_dir / 'online-retail.xlsx'
+csv_path = script_dir / 'online-retail.csv'
 
 try:
-    # Спробуємо прочитати Excel файл. Якщо у вас CSV, використовуйте pd.read_csv
-    # Важливо вказати кодування, оскільки датасет часто містить не-ASCII символи
-    # Поширені кодування для цього датасету: 'ISO-8859-1', 'latin1', 'cp1252'
-    try:
-        df = pd.read_excel(file_path)
-    except ValueError as e:  # Спроба з CSV, якщо Excel не спрацював або помилка формату
-        if 'Excel file format cannot be determined' in str(e) or isinstance(e, FileNotFoundError):
-            print(f"Не вдалося прочитати як Excel. Спроба прочитати як CSV: {file_path.replace('.xlsx', '.csv')}")
-            file_path = file_path.replace('.xlsx', '.csv')  # Спробуємо ім'я CSV
-            df = pd.read_csv(file_path, encoding='ISO-8859-1')
+    if xlsx_path.exists():
+        df = pd.read_excel(xlsx_path)
+        file_path = str(xlsx_path.name)
+    elif csv_path.exists():
+        df = pd.read_csv(csv_path, encoding='ISO-8859-1')
+        file_path = str(csv_path.name)
+    else:
+        # Спроба за відносним шляхом як було вказано (на випадок запуску з іншого місця)
+        fallback_xlsx = Path('online-retail.xlsx')
+        fallback_csv = Path('online-retail.csv')
+        if fallback_xlsx.exists():
+            df = pd.read_excel(fallback_xlsx)
+            file_path = str(fallback_xlsx)
+        elif fallback_csv.exists():
+            df = pd.read_csv(fallback_csv, encoding='ISO-8859-1')
+            file_path = str(fallback_csv)
         else:
-            raise e  # Якщо інша помилка Excel, піднімаємо її
+            raise FileNotFoundError("Не знайдено файли 'online-retail.xlsx' або 'online-retail.csv' поруч зі скриптом.")
 
     print(f"Дані успішно завантажено з '{file_path}'.")
     print(f"Розмірність даних: {df.shape[0]} рядків, {df.shape[1]} колонок")
 
-except FileNotFoundError:
-    print(f"Помилка: Файл '{file_path}' не знайдено.")
-    print(
-        "Будь ласка, завантажте датасет 'Online Retail' (UCI ML Repository або Kaggle) і помістіть його в папку зі скриптом.")
-    exit()
 except Exception as e:
     print(f"Сталася помилка при читанні файлу: {e}")
+    print("Підтримуються формати: .xlsx (рекомендовано) або .csv з кодуванням 'ISO-8859-1'.")
     exit()
 
 # --- 2. Початкове дослідження даних ---
@@ -102,9 +108,13 @@ print(df[['InvoiceDate', 'TotalPrice', 'InvoiceYearMonth', 'InvoiceHour']].head(
 
 # --- 4. EDA та Візуалізація ---
 print("\n--- 4. EDA та Візуалізація ---")
-print("Зараз будуть відкриватися вікна з графіками...")
+print("Графіки будуть збережені у папку 'outputs' поруч зі скриптом.")
 
 sns.set_theme(style="darkgrid")
+
+# Папка для збереження графіків
+outputs_dir = script_dir / 'outputs'
+os.makedirs(outputs_dir, exist_ok=True)
 
 # 4.1 Динаміка загальних продажів за місяцями
 monthly_revenue = df.groupby('InvoiceYearMonth')['TotalPrice'].sum()
@@ -119,19 +129,21 @@ plt.ylabel('Загальний дохід')
 plt.xticks(rotation=45)
 plt.grid(True)
 plt.tight_layout()
-plt.show()
+plt.savefig(os.path.join(outputs_dir, '01_monthly_revenue.png'), dpi=150)
+plt.close()
 
 # 4.2 Загальні продажі за днями тижня
 plt.figure(figsize=(10, 6))
 # Визначимо правильний порядок днів
 day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 sns.barplot(data=df, x='InvoiceDayOfWeek', y='TotalPrice', estimator=sum, errorbar=None,
-            order=day_order, palette='Blues_d')
+            order=day_order, hue='InvoiceDayOfWeek', hue_order=day_order, palette='Blues_d', legend=False)
 plt.title('Загальний дохід за днями тижня')
 plt.xlabel('День тижня')
 plt.ylabel('Загальний дохід')
 plt.tight_layout()
-plt.show()
+plt.savefig(os.path.join(outputs_dir, '02_revenue_by_weekday.png'), dpi=150)
+plt.close()
 
 # 4.3 Загальні продажі за годинами дня
 plt.figure(figsize=(12, 6))
@@ -142,7 +154,8 @@ plt.xlabel('Година дня (0-23)')
 plt.ylabel('Загальний дохід')
 plt.xticks(rotation=0)
 plt.tight_layout()
-plt.show()
+plt.savefig(os.path.join(outputs_dir, '03_revenue_by_hour.png'), dpi=150)
+plt.close()
 
 # 4.4 Топ-10 товарів за кількістю продажів
 top_products_quantity = df.groupby('Description')['Quantity'].sum().sort_values(ascending=False).head(10)
@@ -152,7 +165,8 @@ plt.title('Топ-10 товарів за кількістю проданих о�
 plt.xlabel('Загальна кількість проданих одиниць')
 plt.ylabel('Опис товару')
 plt.tight_layout()
-plt.show()
+plt.savefig(os.path.join(outputs_dir, '04_top_products_by_quantity.png'), dpi=150)
+plt.close()
 
 # 4.5 Топ-10 товарів за загальним доходом
 top_products_revenue = df.groupby('Description')['TotalPrice'].sum().sort_values(ascending=False).head(10)
@@ -162,12 +176,13 @@ plt.title('Топ-10 товарів за загальним доходом')
 plt.xlabel('Загальний дохід')
 plt.ylabel('Опис товару')
 plt.tight_layout()
-plt.show()
+plt.savefig(os.path.join(outputs_dir, '05_top_products_by_revenue.png'), dpi=150)
+plt.close()
 
 # 4.6 Топ-10 країн за загальним доходом (без UK для кращої видимості інших)
 top_countries = df.groupby('Country')['TotalPrice'].sum().sort_values(ascending=False)
 # Виключимо UK, оскільки вона домінує
-top_countries_no_uk = top_countries.drop('United Kingdom').head(10)
+top_countries_no_uk = top_countries.drop(labels=['United Kingdom'], errors='ignore').head(10)
 
 plt.figure(figsize=(12, 7))
 top_countries_no_uk.sort_values().plot(kind='barh', color='gold')
@@ -175,7 +190,8 @@ plt.title('Топ-10 країн за загальним доходом (без �
 plt.xlabel('Загальний дохід')
 plt.ylabel('Країна')
 plt.tight_layout()
-plt.show()
+plt.savefig(os.path.join(outputs_dir, '06_top_countries_no_uk.png'), dpi=150)
+plt.close()
 
 print("\nЗагальний дохід по країнах (включаючи UK):")
 print(top_countries.head())
@@ -189,7 +205,8 @@ plt.xlabel('Вартість замовлення')
 plt.ylabel('Кількість замовлень')
 plt.xlim(0, 1000)  # Обмежимо вісь X, щоб побачити основний розподіл
 plt.tight_layout()
-plt.show()
+plt.savefig(os.path.join(outputs_dir, '07_invoice_value_hist.png'), dpi=150)
+plt.close()
 print(f"\nСередня вартість одного замовлення: {invoice_value.mean():.2f}")
 print(f"Медіанна вартість одного замовлення: {invoice_value.median():.2f}")
 
