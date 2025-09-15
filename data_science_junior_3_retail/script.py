@@ -6,8 +6,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import datetime as dt  # Для роботи з датами та часом
 
-print("Бібліотеки os, pathlib, pandas, numpy, matplotlib, seaborn, datetime імпортовано.")
-
 # --- 1. Завантаження даних ---
 # Автоматичний пошук файлу поруч зі скриптом: спочатку .xlsx, потім .csv
 script_dir = Path(__file__).parent

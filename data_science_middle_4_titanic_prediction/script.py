@@ -3,6 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import re  # Для роботи з регулярними виразами (витягнення титулів)
+import os
+import random
 
 # Модулі Scikit-learn
 from sklearn.model_selection import train_test_split  # Для розділення даних
@@ -20,16 +22,45 @@ from sklearn.ensemble import RandomForestClassifier
 # Метрики для оцінки
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report, roc_auc_score, roc_curve
 
-print("Бібліотеки імпортовано.")
+# Встановимо зерна випадковості для відтворюваності
+np.random.seed(42)
+random.seed(42)
+
+# Каталог для збереження графіків
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'outputs')
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+SHOW_PLOTS = False  # встановіть True, якщо хочете бачити інтерактивні вікна графіків
+
+print("Бібліотеки імпортовано та середовище ініціалізовано.")
 
 # --- 1. Завантаження даних ---
-file_path = 'train.csv'
+primary_path = os.path.join(os.path.dirname(__file__), 'train.csv')
+fallback_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data_science_junior_1_titanic', 'train.csv')
+
+# Спроба завантажити основний файл; якщо він відсутній, порожній або некоректний — використовуємо запасний датасет
+use_fallback = False
 try:
-    df = pd.read_csv(file_path)
-    print(f"Дані успішно завантажено з '{file_path}'. Розмір: {df.shape}")
+    df = pd.read_csv(primary_path)
+    # Перевіримо, чи файл не порожній і має стовпці
+    if df.empty or df.shape[1] == 0:
+        print(f"Попередження: Файл '{primary_path}' порожній або без колонок. Буде використано запасний датасет.")
+        use_fallback = True
+    else:
+        print(f"Дані успішно завантажено з '{primary_path}'. Розмір: {df.shape}")
 except FileNotFoundError:
-    print(f"Помилка: Файл '{file_path}' не знайдено.")
-    exit()
+    print(f"Попередження: Файл '{primary_path}' не знайдено. Буде використано запасний датасет.")
+    use_fallback = True
+except pd.errors.EmptyDataError:
+    print(f"Попередження: Файл '{primary_path}' порожній або має неправильний формат (EmptyDataError). Буде використано запасний датасет.")
+    use_fallback = True
+
+if use_fallback:
+    try:
+        df = pd.read_csv(fallback_path)
+        print(f"Дані завантажено з запасного шляху '{fallback_path}'. Розмір: {df.shape}")
+    except Exception as e:
+        print(f"Помилка: Не вдалося завантажити дані ані з основного файлу, ані з запасного. Деталі: {e}")
+        exit()
 
 # Зробимо копію для безпеки
 df_processed = df.copy()
@@ -38,15 +69,8 @@ df_processed = df.copy()
 print("\n--- 2. Інженерія Ознак та Передобробка ---")
 
 # 2.1 Обробка пропущених значень
-# Age: Заповнимо медіаною
-median_age = df_processed['Age'].median()
-df_processed['Age'].fillna(median_age, inplace=True)
-print(f"NaN в 'Age' заповнено медіаною ({median_age:.2f}).")
-
-# Embarked: Заповнимо модою
-mode_embarked = df_processed['Embarked'].mode()[0]
-df_processed['Embarked'].fillna(mode_embarked, inplace=True)
-print(f"NaN в 'Embarked' заповнено модою ('{mode_embarked}').")
+# ВАЖЛИВО: Заповнення пропусків виконаємо строго всередині sklearn-пайплайна (SimpleImputer)
+# щоб уникнути витоку даних (data leakage) при розділенні train/validation. Тут нічого не заповнюємо.
 
 # Cabin: Створимо бінарну ознаку 'Has_Cabin'
 df_processed['Has_Cabin'] = df_processed['Cabin'].notna().astype(int)  # 1 якщо є каюта, 0 - якщо NaN
@@ -64,7 +88,7 @@ print("Створено бінарну ознаку 'IsAlone'.")
 
 # Title (витягнення титулу з імені)
 def get_title(name):
-    title_search = re.search(' ([A-Za-z]+)\.', name)
+    title_search = re.search(r' ([A-Za-z]+)\.', name)
     if title_search:
         return title_search.group(1)
     return ""
@@ -121,9 +145,15 @@ numeric_transformer = Pipeline(steps=[
 
 # Пайплайн для категоріальних ознак: заповнення пропусків (якщо є) + One-Hot Encoding
 # handle_unknown='ignore' допомагає уникнути помилок, якщо в валідаційних даних з'явиться категорія, якої не було в тренувальних
+# Сумісність зі sklearn: спочатку пробуємо параметр sparse_output (нові версії), якщо недоступний — використовуємо sparse (старі версії)
+try:
+    ohe = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
+except TypeError:
+    ohe = OneHotEncoder(handle_unknown='ignore', sparse=False)
+
 categorical_transformer = Pipeline(steps=[
     ('imputer', SimpleImputer(strategy='most_frequent')),  # Заповнення модою
-    ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False))  # One-Hot кодування
+    ('onehot', ohe)  # One-Hot кодування
 ])
 
 # Об'єднуємо пайплайни за допомогою ColumnTransformer
@@ -146,7 +176,7 @@ models = {
     "Logistic Regression": LogisticRegression(random_state=42, max_iter=1000),
     "K-Nearest Neighbors": KNeighborsClassifier(n_neighbors=5),  # n_neighbors - гіперпараметр
     "Decision Tree": DecisionTreeClassifier(random_state=42),
-    "Random Forest": RandomForestClassifier(random_state=42, n_estimators=100)  # n_estimators - гіперпараметр
+    "Random Forest": RandomForestClassifier(random_state=42, n_estimators=200, n_jobs=-1)  # n_estimators і n_jobs
 }
 
 results = {}  # Словник для зберігання результатів
@@ -168,7 +198,7 @@ for name, model in models.items():
     # Оцінюємо модель
     accuracy = accuracy_score(y_val, y_pred)
     roc_auc = roc_auc_score(y_val, y_pred_proba)
-    report = classification_report(y_val, y_pred, target_names=['Загинув (0)', 'Вижив (1)'])
+    report = classification_report(y_val, y_pred, target_names=['Загинув (0)', 'Вижив (1)'], zero_division=0)
     conf_matrix = confusion_matrix(y_val, y_pred)
 
     results[name] = {'accuracy': accuracy, 'roc_auc': roc_auc, 'report': report, 'conf_matrix': conf_matrix}
@@ -187,7 +217,13 @@ for name, model in models.items():
     plt.xlabel('Передбачений клас')
     plt.ylabel('Істинний клас')
     plt.title(f'Матриця помилок для {name}')
-    plt.show()
+    file_path_cm = os.path.join(OUTPUT_DIR, f"confusion_matrix_{name.replace(' ', '_').lower()}.png")
+    plt.tight_layout()
+    if SHOW_PLOTS:
+        plt.show()
+    else:
+        plt.savefig(file_path_cm, dpi=150)
+    plt.close()
 
 # --- 6. Порівняння результатів ---
 print("\n--- 6. Порівняння результатів ---")
@@ -200,12 +236,17 @@ results_df = results_df.sort_values(by='ROC AUC', ascending=False).reset_index(d
 print(results_df)
 
 plt.figure(figsize=(10, 5))
-sns.barplot(x='ROC AUC', y='Model', data=results_df, palette='viridis')
+sns.barplot(x='ROC AUC', y='Model', data=results_df, color='C0')
 plt.title('Порівняння моделей за ROC AUC')
 plt.xlabel('ROC AUC Score')
 plt.ylabel('Модель')
 plt.xlim(0.5, 1.0)  # Встановимо межі для кращої візуалізації
 plt.tight_layout()
-plt.show()
+barplot_path = os.path.join(OUTPUT_DIR, 'model_comparison_roc_auc.png')
+if SHOW_PLOTS:
+    plt.show()
+else:
+    plt.savefig(barplot_path, dpi=150)
+plt.close()
 
 print("\n--- Прогнозування виживання на 'Титаніку' завершено ---")
