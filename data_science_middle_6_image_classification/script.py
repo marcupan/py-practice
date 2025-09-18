@@ -5,9 +5,26 @@ from tensorflow import keras
 from tensorflow.keras import layers, models
 from tensorflow.keras.datasets import cifar10
 from tensorflow.keras.utils import to_categorical
+import os
 
 print("Бібліотеки TensorFlow, NumPy, Matplotlib імпортовано.")
 print(f"Версія TensorFlow: {tf.__version__}")
+
+# Фіксуємо випадковість для відтворюваності
+np.random.seed(42)
+tf.random.set_seed(42)
+
+# Каталог для збереження вихідних графіків і результатів
+OUTPUT_DIR = "data_science_middle_6_image_classification\\outputs"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# Опціонально: дозволяємо поступове виділення пам'яті для GPU (якщо доступний)
+try:
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    for gpu in gpus:
+        tf.config.experimental.set_memory_growth(gpu, True)
+except Exception:
+    pass
 
 # --- 1. Завантаження та підготовка даних CIFAR-10 ---
 print("\n--- 1. Завантаження даних CIFAR-10 ---")
@@ -38,7 +55,8 @@ for i in range(25):  # Покажемо перші 25 зображень
     plt.xlabel(class_names[y_train[i][0]])
 plt.suptitle("Приклади зображень з тренувального набору CIFAR-10")
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Відступ для основного заголовка
-plt.show()
+plt.savefig(os.path.join(OUTPUT_DIR, "01_examples.png"), dpi=150)
+plt.close()
 
 # --- 3. Передобробка даних ---
 print("\n--- 3. Передобробка даних ---")
@@ -115,10 +133,16 @@ print("\n--- 6. Тренування моделі ---")
 epochs = 15  # Можна збільшити для кращої точності, але тренування буде довшим
 batch_size = 64
 
+# Використаємо частину тренувальних даних для валідації, щоб не підглядати в тест
+callbacks = [
+    keras.callbacks.EarlyStopping(monitor='val_accuracy', patience=3, restore_best_weights=True)
+]
 history = model.fit(x_train, y_train_one_hot,
                     epochs=epochs,
                     batch_size=batch_size,
-                    validation_data=(x_test, y_test_one_hot))  # Використовуємо тестовий набір як валідаційний
+                    validation_split=0.1,
+                    callbacks=callbacks,
+                    verbose=2)
 
 print("\nТренування завершено.")
 
@@ -162,7 +186,8 @@ plt.ylabel('Втрати')
 
 plt.suptitle("Результати тренування моделі CNN на CIFAR-10")
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-plt.show()
+plt.savefig(os.path.join(OUTPUT_DIR, "02_training_curves.png"), dpi=150)
+plt.close()
 
 # --- 9. Приклад прогнозування (опціонально) ---
 print("\n--- 9. Приклад прогнозування на тестових зображеннях ---")
@@ -175,7 +200,7 @@ def plot_image_prediction(i, predictions_array, true_label_index, img):
     plt.grid(False)
     plt.xticks([])
     plt.yticks([])
-    plt.imshow(img, cmap=plt.cm.binary)  # Відображаємо зображення
+    plt.imshow(img)  # Відображаємо зображення в кольорі
 
     predicted_label_index = np.argmax(predictions_array)  # Знаходимо індекс класу з найбільшою ймовірністю
     confidence = np.max(predictions_array)  # Ймовірність передбаченого класу
@@ -214,6 +239,7 @@ for i in range(num_images):
     plt.subplot(num_rows, 2 * num_cols, 2 * i + 2)  # Парні позиції для графіків ймовірностей
     plot_value_array(i, predictions, y_test)
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-plt.show()
+plt.savefig(os.path.join(OUTPUT_DIR, "03_predictions_examples.png"), dpi=150)
+plt.close()
 
 print("\n--- Класифікація зображень CIFAR-10 завершена ---")
