@@ -18,13 +18,17 @@ tf.random.set_seed(42)
 OUTPUT_DIR = "data_science_middle_6_image_classification\\outputs"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Опціонально: дозволяємо поступове виділення пам'яті для GPU (якщо доступний)
-try:
-    gpus = tf.config.experimental.list_physical_devices('GPU')
-    for gpu in gpus:
-        tf.config.experimental.set_memory_growth(gpu, True)
-except Exception:
-    pass
+# Налаштування GPU для оптимальної роботи
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    try:
+        # Дозволити поступове виділення пам'яті GPU
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+
+        print(f"✅ GPU налаштовано: {len(gpus)} пристроїв знайдено")
+    except RuntimeError as e:
+        print(f"Налаштування GPU: {e}")
 
 # --- 1. Завантаження та підготовка даних CIFAR-10 ---
 print("\n--- 1. Завантаження даних CIFAR-10 ---")
