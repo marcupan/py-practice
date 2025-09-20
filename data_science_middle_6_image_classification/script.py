@@ -15,7 +15,8 @@ np.random.seed(42)
 tf.random.set_seed(42)
 
 # Каталог для збереження вихідних графіків і результатів
-OUTPUT_DIR = "data_science_middle_6_image_classification\\outputs"
+script_dir = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(script_dir, "outputs")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Налаштування GPU для оптимальної роботи
