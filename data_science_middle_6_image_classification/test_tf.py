@@ -1,5 +1,5 @@
 import os
-# Менше шуму в логах TensorFlow і безпечне керування пам'яттю GPU/акселератором
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
