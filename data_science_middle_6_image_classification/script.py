@@ -1,11 +1,25 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers, models
-from tensorflow.keras.datasets import cifar10
-from tensorflow.keras.utils import to_categorical
 import os
+import tarfile
+import urllib.request
+import pickle
+
+# Import TensorFlow safely without eager-loading Keras application submodules
+try:
+    import tensorflow as tf
+except Exception as e:
+    print("Error importing TensorFlow. This may be due to an incompatible NumPy/Keras/TensorFlow setup.")
+    print("Details:", e)
+    print("Tip: Ensure compatible versions (e.g., numpy<2 with TensorFlow 2.13/2.14, and avoid standalone keras>=3 with older TF).")
+    raise SystemExit(1)
+
+# Use TensorFlow-bundled Keras to avoid importing the external 'keras' package which may be incompatible
+try:
+    from tensorflow.python.keras import layers as tfl_layers, models as tfl_models, callbacks as tfl_callbacks
+except Exception as e:
+    tfl_layers = tfl_models = tfl_callbacks = None
+    print("Попередження: Не вдалося імпортувати вбудовані модулі Keras з TensorFlow. Спроба fallback може спричинити помилки в цьому середовищі.")
 
 print("Бібліотеки TensorFlow, NumPy, Matplotlib імпортовано.")
 print(f"Версія TensorFlow: {tf.__version__}")
@@ -32,10 +46,63 @@ if gpus:
         print(f"Налаштування GPU: {e}")
 
 # --- 1. Завантаження та підготовка даних CIFAR-10 ---
+def load_cifar10_local(cache_dir):
+    """
+    Load CIFAR-10 dataset without using tf.keras.datasets to avoid triggering Keras applications imports.
+    Downloads and caches the original CIFAR-10 python version from the official website if not available.
+    Returns:
+        (x_train, y_train), (x_test, y_test) with shapes ((50000,32,32,3),(50000,1)), ((10000,32,32,3),(10000,1))
+    """
+    os.makedirs(cache_dir, exist_ok=True)
+    url = "https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
+    tar_path = os.path.join(cache_dir, "cifar-10-python.tar.gz")
+    extract_dir = os.path.join(cache_dir, "cifar-10-batches-py")
+
+    if not os.path.isdir(extract_dir):
+        print("Завантаження CIFAR-10 (оригінальний архів)...")
+        urllib.request.urlretrieve(url, tar_path)
+        print("Розпакування CIFAR-10...")
+        with tarfile.open(tar_path, "r:gz") as tar:
+            # Safe extract to prevent path traversal
+            def is_within_directory(directory, target):
+                abs_directory = os.path.abspath(directory)
+                abs_target = os.path.abspath(target)
+                return os.path.commonpath([abs_directory]) == os.path.commonpath([abs_directory, abs_target])
+            for member in tar.getmembers():
+                member_path = os.path.join(cache_dir, member.name)
+                if not is_within_directory(cache_dir, member_path):
+                    raise Exception("Виявлено небезпечний шлях в архіві CIFAR-10.")
+            tar.extractall(cache_dir)
+        try:
+            os.remove(tar_path)
+        except Exception:
+            pass
+
+    def load_batch(batch_path):
+        with open(batch_path, "rb") as f:
+            d = pickle.load(f, encoding="latin1")
+            data = d["data"]  # shape (10000, 3072)
+            labels = d.get("labels") or d.get("fine_labels")
+            data = data.reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)  # -> (N, 32, 32, 3)
+            labels = np.array(labels).reshape(-1, 1)
+            return data, labels
+
+    # Train batches
+    xs, ys = [], []
+    for i in range(1, 6):
+        X, y = load_batch(os.path.join(extract_dir, f"data_batch_{i}"))
+        xs.append(X); ys.append(y)
+    x_train = np.concatenate(xs, axis=0)
+    y_train = np.concatenate(ys, axis=0)
+
+    # Test batch
+    x_test, y_test = load_batch(os.path.join(extract_dir, "test_batch"))
+    return (x_train, y_train), (x_test, y_test)
+
 print("\n--- 1. Завантаження даних CIFAR-10 ---")
 
 # Завантажуємо датасет. Він автоматично розділений на тренувальний та тестовий набори.
-(x_train, y_train), (x_test, y_test) = cifar10.load_data()
+(x_train, y_train), (x_test, y_test) = load_cifar10_local(os.path.join(script_dir, "data"))
 
 print(
     f"Розмір тренувальних зображень: {x_train.shape}")  # (50000, 32, 32, 3) - 50k зображень 32x32 пікселі, 3 канали (RGB)
@@ -76,8 +143,15 @@ print("Значення пікселів нормалізовано до діа�
 # 3.2 Перетворення міток на One-Hot Encoding
 # Наприклад, мітка '3' (bird) стане вектором [0, 0, 0, 1, 0, 0, 0, 0, 0, 0]
 num_classes = 10
-y_train_one_hot = to_categorical(y_train, num_classes)
-y_test_one_hot = to_categorical(y_test, num_classes)
+
+def to_categorical_np(y, num_classes):
+    y = np.asarray(y).reshape(-1)
+    out = np.zeros((y.size, num_classes), dtype=np.float32)
+    out[np.arange(y.size), y] = 1.0
+    return out
+
+y_train_one_hot = to_categorical_np(y_train, num_classes)
+y_test_one_hot = to_categorical_np(y_test, num_classes)
 print("Мітки перетворено на формат One-Hot Encoding.")
 print(f"Приклад мітки до перетворення: {y_train[0]}")
 print(f"Приклад мітки після перетворення: {y_train_one_hot[0]}")
@@ -85,38 +159,42 @@ print(f"Приклад мітки після перетворення: {y_train_
 # --- 4. Побудова моделі CNN ---
 print("\n--- 4. Побудова моделі CNN ---")
 
-model = models.Sequential()
+# Використаємо вбудований у TensorFlow Keras (уникаємо зовнішнього пакета 'keras')
+if 'tfl_models' not in globals() or tfl_models is None:
+    print("Помилка: Неможливо використати tf.keras через конфлікт версій Keras.\nБудь ласка, видаліть пакет 'keras' або встановіть сумісну версію (keras==2.10.*) для TF 2.10.\nТакож можна спробувати встановити змінну середовища TF_USE_LEGACY_KERAS=1 перед запуском.")
+    raise SystemExit(1)
+model = tfl_models.Sequential()
 
 # Блок 1: Згортка + Пулінг
-model.add(layers.Conv2D(32, (3, 3), activation='relu', padding='same', input_shape=(32, 32, 3)))
+model.add(tfl_layers.Conv2D(32, (3, 3), activation='relu', padding='same', input_shape=(32, 32, 3)))
 # 32 - кількість фільтрів, (3, 3) - розмір ядра, 'relu' - функція активації
 # padding='same' - доповнення нулями, щоб розмір зображення не зменшувався після згортки
 # input_shape - розмір вхідного зображення (лише для першого шару)
-model.add(layers.MaxPooling2D((2, 2)))  # Зменшує розмір зображення вдвічі
+model.add(tfl_layers.MaxPooling2D((2, 2)))  # Зменшує розмір зображення вдвічі
 
 # Блок 2: Згортка + Пулінг
-model.add(layers.Conv2D(64, (3, 3), activation='relu', padding='same'))  # Збільшуємо кількість фільтрів
-model.add(layers.MaxPooling2D((2, 2)))
+model.add(tfl_layers.Conv2D(64, (3, 3), activation='relu', padding='same'))  # Збільшуємо кількість фільтрів
+model.add(tfl_layers.MaxPooling2D((2, 2)))
 
 # Блок 3: Згортка + Пулінг
-model.add(layers.Conv2D(128, (3, 3), activation='relu', padding='same'))  # Ще збільшуємо кількість фільтрів
-model.add(layers.MaxPooling2D((2, 2)))
+model.add(tfl_layers.Conv2D(128, (3, 3), activation='relu', padding='same'))  # Ще збільшуємо кількість фільтрів
+model.add(tfl_layers.MaxPooling2D((2, 2)))
 
 # Додаємо Dropout для регуляризації (зменшення перенавчання)
 # Він випадково "вимикає" частину нейронів під час тренування
-model.add(layers.Dropout(0.25))  # Вимикаємо 25% нейронів
+model.add(tfl_layers.Dropout(0.25))  # Вимикаємо 25% нейронів
 
 # Перетворення 2D-карт ознак на 1D-вектор
-model.add(layers.Flatten())
+model.add(tfl_layers.Flatten())
 
 # Повнозв'язний шар (Dense)
-model.add(layers.Dense(512, activation='relu'))  # 512 нейронів
-model.add(layers.Dropout(0.5))  # Більший Dropout перед вихідним шаром
+model.add(tfl_layers.Dense(512, activation='relu'))  # 512 нейронів
+model.add(tfl_layers.Dropout(0.5))  # Більший Dropout перед вихідним шаром
 
 # Вихідний шар
 # Кількість нейронів = кількість класів (10)
 # Функція активації 'softmax' для багатокласової класифікації (видає ймовірності для кожного класу)
-model.add(layers.Dense(num_classes, activation='softmax'))
+model.add(tfl_layers.Dense(num_classes, activation='softmax'))
 
 # Виводимо структуру моделі
 print("\nСтруктура моделі (Model Summary):")
@@ -140,7 +218,7 @@ batch_size = 64
 
 # Використаємо частину тренувальних даних для валідації, щоб не підглядати в тест
 callbacks = [
-    keras.callbacks.EarlyStopping(monitor='val_accuracy', patience=3, restore_best_weights=True)
+    tfl_callbacks.EarlyStopping(monitor='val_accuracy', patience=3, restore_best_weights=True)
 ]
 history = model.fit(x_train, y_train_one_hot,
                     epochs=epochs,
@@ -167,7 +245,7 @@ val_acc = history.history['val_accuracy']
 loss = history.history['loss']
 val_loss = history.history['val_loss']
 
-epochs_range = range(epochs)
+epochs_range = range(1, len(acc) + 1)
 
 plt.figure(figsize=(12, 5))
 
