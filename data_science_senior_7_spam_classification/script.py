@@ -3,14 +3,29 @@ import string
 import logging
 import sys
 import math
-
-
+from pathlib import Path
+import argparse
 
 # Scikit-learn імпорти будуть виконані всередині main() з безпечними перевірками середовища
 
 logger = logging.getLogger(__name__)
 
 def main():
+    # --- CLI аргументи ---
+    parser = argparse.ArgumentParser(description="SMS Spam Classification")
+    parser.add_argument(
+        "--data",
+        type=str,
+        default=None,
+        help="Шлях до каталогу з даними або до файлу SMSSpamCollection/spam.csv. Якщо не вказано — шукаємо в ./data/ та поруч зі скриптом.",
+    )
+    parser.add_argument(
+        "--plots",
+        action="store_true",
+        help="Спробувати імпортувати matplotlib/seaborn і показувати графіки (за замовчуванням вимкнено, щоб уникати NumPy/Matplotlib ABI-конфліктів).",
+    )
+    args = parser.parse_args()
+
     logging.basicConfig(level=logging.INFO)
     logger.info("Бібліотеки імпортовано.")
 
@@ -42,18 +57,21 @@ def main():
             e,
         )
 
-    # Optional plotting libraries (import after pandas succeeds)
+    # Optional plotting libraries are imported ONLY if --plots передано.
     plotting_enabled = False
-    if pandas_available:
+    if pandas_available and args.plots:
         try:
-            import matplotlib.pyplot as plt
-            import seaborn as sns
+            import matplotlib.pyplot as plt  # noqa: F401
+            import seaborn as sns  # noqa: F401
             plotting_enabled = True
         except Exception as e:
             plotting_enabled = False
-            logger.warning("Plotting libraries unavailable or failed to import (possibly due to pandas dependencies). Skipping plots. Error: %s", e)
+            logger.warning("Plotting libraries unavailable or failed to import (possibly due to pandas/NumPy deps). Skipping plots. Error: %s", e)
     else:
-        logger.info("Pandas not available; skipping plotting imports and all plots.")
+        if args.plots and not pandas_available:
+            logger.info("Pandas not available; skipping plotting imports and all plots.")
+        elif not args.plots:
+            logger.info("Прапорець --plots не заданий — імпорт графічних бібліотек вимкнено.")
 
     # Import scikit-learn lazily with environment guard to avoid NumPy/SciPy ABI crashes at import time
     sklearn_available = True
@@ -64,7 +82,9 @@ def main():
         from sklearn.naive_bayes import MultinomialNB
         from sklearn.linear_model import LogisticRegression
         from sklearn.svm import SVC
-        from sklearn.metrics import accuracy_score, confusion_matrix, classification_report, ConfusionMatrixDisplay
+        from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+        if plotting_enabled:
+            from sklearn.metrics import ConfusionMatrixDisplay
     except Exception as e:
         sklearn_available = False
         logger.error(
@@ -77,86 +97,96 @@ def main():
             np.__version__, e,
         )
 
-    # --- 1. Завантаження даних ---
-    file_path_tsv = 'SMSSpamCollection'
-    file_path_csv = 'spam.csv'
+    # --- 1. Надійний пошук даних ---
+    script_dir = Path(__file__).resolve().parent
+    # Якщо передали файл напряму
+    candidates = []
+    if args.data:
+        p = Path(args.data).expanduser().resolve()
+        if p.is_file():
+            candidates = [p]
+        else:
+            # передано каталог
+            candidates = [p / "SMSSpamCollection", p / "spam.csv"]
+    else:
+        data_dir = script_dir / "data"
+        candidates = [
+            data_dir / "SMSSpamCollection",
+            data_dir / "spam.csv",
+            script_dir / "SMSSpamCollection",
+            script_dir / "spam.csv",
+        ]
 
+    file_path = next((c for c in candidates if c.exists()), None)
+    if not file_path:
+        logger.error("Помилка: Дані не знайдено. Шукали в: %s", ", ".join(map(str, candidates)))
+        sys.exit(1)
+
+    # --- 1b. Завантаження даних ---
     if pandas_available:
         try:
-            df = pd.read_csv(file_path_tsv, sep='\t', header=None, names=['label', 'message'], encoding='latin-1')
-            logger.info(f"Дані завантажено з '{file_path_tsv}' (роздільник - таб).")
-        except FileNotFoundError:
-            try:
-                df = pd.read_csv(file_path_csv, encoding='latin-1')
-                if 'v1' in df.columns and 'v2' in df.columns:
+            if file_path.name == "SMSSpamCollection":
+                df = pd.read_csv(file_path, sep='\t', header=None, names=['label', 'message'], encoding='latin-1')
+                logger.info(f"Дані завантажено з '{file_path}' (таб-роздільник).")
+            else:
+                df = pd.read_csv(file_path, encoding='latin-1')
+                if {'v1', 'v2'}.issubset(df.columns):
                     df = df[['v1', 'v2']]
                     df.columns = ['label', 'message']
-                    logger.info(f"Дані завантажено з '{file_path_csv}' (роздільник - кома, з заголовком).")
                 else:
-                    df = pd.read_csv(file_path_csv, header=None, names=['label', 'message'], encoding='latin-1')
-                    logger.info(f"Дані завантажено з '{file_path_csv}' (роздільник - кома, без заголовка).")
-            except FileNotFoundError:
-                logger.error(f"Помилка: Файли '{file_path_tsv}' та '{file_path_csv}' не знайдено.")
-                sys.exit(1)
+                    # Якщо інші заголовки — беремо перші дві колонки
+                    if df.shape[1] >= 2:
+                        df = df.iloc[:, :2]
+                        df.columns = ['label', 'message']
+                logger.info(f"Дані завантажено з '{file_path}'.")
         except Exception as e:
             logger.exception(f"Сталася помилка при читанні файлу: {e}")
             sys.exit(1)
     else:
         # Fallback CSV/TSV loading without pandas
-        import os, csv
+        import csv
         labels = []
         messages = []
         try:
-            with open(file_path_tsv, 'r', encoding='latin-1', newline='') as f:
-                reader = csv.reader(f, delimiter='\t')
-                for row in reader:
-                    if len(row) >= 2:
-                        labels.append(row[0])
-                        messages.append(row[1])
-            logger.info(f"Дані завантажено з '{file_path_tsv}' (роздільник - таб) без pandas.")
-        except FileNotFoundError:
-            try:
-                with open(file_path_csv, 'r', encoding='latin-1', newline='') as f:
-                    sample = f.read(2048)
-                    f.seek(0)
+            if file_path.name == "SMSSpamCollection":
+                with open(file_path, 'r', encoding='latin-1', newline='') as f:
+                    reader = csv.reader(f, delimiter='\t')
+                    for row in reader:
+                        if len(row) >= 2:
+                            labels.append(row[0]); messages.append(row[1])
+                logger.info(f"Дані завантажено з '{file_path}' (таб) без pandas.")
+            else:
+                with open(file_path, 'r', encoding='latin-1', newline='') as f:
+                    sample = f.read(2048); f.seek(0)
                     has_header = csv.Sniffer().has_header(sample)
                     if has_header:
                         dr = csv.DictReader(f)
                         fieldnames = [fn.strip() for fn in (dr.fieldnames or [])]
                         if 'v1' in fieldnames and 'v2' in fieldnames:
                             for row in dr:
-                                labels.append(row.get('v1', ''))
-                                messages.append(row.get('v2', ''))
-                            logger.info(f"Дані завантажено з '{file_path_csv}' (кома, з заголовком v1/v2) без pandas.")
+                                labels.append(row.get('v1', '')); messages.append(row.get('v2', ''))
                         else:
                             first_two = fieldnames[:2]
                             for row in dr:
-                                labels.append(row.get(first_two[0], ''))
-                                messages.append(row.get(first_two[1], ''))
-                            logger.info(f"Дані завантажено з '{file_path_csv}' (кома, з заголовком) без pandas.")
+                                labels.append(row.get(first_two[0], '')); messages.append(row.get(first_two[1], ''))
+                        logger.info(f"Дані завантажено з '{file_path}' (кома, з заголовком) без pandas.")
                     else:
                         f.seek(0)
                         rr = csv.reader(f)
-                        # Handle possible mis-detection: if the first row looks like a header ['v1','v2'], skip it.
                         first_row = next(rr, None)
                         if first_row is not None:
                             if len(first_row) >= 2 and first_row[0].strip().lower() == 'v1' and first_row[1].strip().lower() == 'v2':
                                 logger.info("Виявлено рядок заголовка ['v1','v2'] у файлі без заголовка — пропускаємо його.")
                             else:
                                 if len(first_row) >= 2:
-                                    labels.append(first_row[0])
-                                    messages.append(first_row[1])
+                                    labels.append(first_row[0]); messages.append(first_row[1])
                         for row in rr:
                             if len(row) >= 2:
-                                labels.append(row[0])
-                                messages.append(row[1])
-                        logger.info(f"Дані завантажено з '{file_path_csv}' (кома, без заголовка) без pandas.")
-            except FileNotFoundError:
-                logger.error(f"Помилка: Файли '{file_path_tsv}' та '{file_path_csv}' не знайдено.")
-                sys.exit(1)
-            except Exception as e:
-                logger.exception(f"Сталася помилка при читанні файлу (csv без pandas): {e}")
-                sys.exit(1)
+                                labels.append(row[0]); messages.append(row[1])
+                        logger.info(f"Дані завантажено з '{file_path}' (кома, без заголовка) без pandas.")
+        except Exception as e:
+            logger.exception(f"Сталася помилка при читанні файлу (csv/tsv без pandas): {e}")
+            sys.exit(1)
 
     # --- 2. Початкове дослідження даних (EDA) ---
     logger.info("--- 2. Початкове дослідження даних (EDA) ---")
@@ -169,6 +199,8 @@ def main():
 
         logger.info("Розподіл класів (ham/spam):\n%s", df['label'].value_counts())
         if plotting_enabled:
+            import matplotlib.pyplot as plt
+            import seaborn as sns
             sns.countplot(data=df, x='label', hue='label', palette='viridis', legend=False)
             plt.title('Розподіл повідомлень Ham vs Spam')
             plt.show()
@@ -179,6 +211,8 @@ def main():
         logger.info("Статистика довжини повідомлень:\n%s", df['message_length'].describe())
 
         if plotting_enabled:
+            import matplotlib.pyplot as plt
+            import seaborn as sns
             plt.figure(figsize=(10, 6))
             sns.histplot(data=df, x='message_length', hue='label', kde=True, bins=50)
             plt.title('Розподіл довжини повідомлень для Ham та Spam')
@@ -257,36 +291,27 @@ def main():
         # Власна стратифікована вибірка 80/20 без sklearn
         try:
             y_list = list(y) if not isinstance(y, list) else y
-            n = len(y_list)
             idx_ham = [i for i, t in enumerate(y_list) if int(t) == 0]
             idx_spam = [i for i, t in enumerate(y_list) if int(t) == 1]
             rng = np.random.RandomState(42)
-            rng.shuffle(idx_ham)
-            rng.shuffle(idx_spam)
+            rng.shuffle(idx_ham); rng.shuffle(idx_spam)
             def split_indices(idxs):
                 k = max(1, int(round(0.2 * len(idxs)))) if len(idxs) > 0 else 0
-                test_i = idxs[:k]
-                train_i = idxs[k:]
-                return train_i, test_i
+                return idxs[k:], idxs[:k]
             train_ham, test_ham = split_indices(idx_ham)
             train_spam, test_spam = split_indices(idx_spam)
             train_idx = train_ham + train_spam
             test_idx = test_ham + test_spam
-            # щоби порядок не впливав, перемішаємо кожен набір
-            rng.shuffle(train_idx)
-            rng.shuffle(test_idx)
-            # Індексування X, y може бути списком або pandas Series — обробимо універсально
+            rng.shuffle(train_idx); rng.shuffle(test_idx)
             def take(seq, indices):
                 if hasattr(seq, 'iloc'):
                     return list(seq.iloc[indices])
                 elif hasattr(seq, '__getitem__'):
                     return [seq[i] for i in indices]
                 else:
-                    return [seq for _ in indices]  # fallback, не має статись
-            X_train = take(X, train_idx)
-            X_test = take(X, test_idx)
-            y_train = [y_list[i] for i in train_idx]
-            y_test = [y_list[i] for i in test_idx]
+                    return [seq for _ in indices]
+            X_train = take(X, train_idx); X_test = take(X, test_idx)
+            y_train = [y_list[i] for i in train_idx]; y_test = [y_list[i] for i in test_idx]
         except Exception as e:
             logger.exception("Не вдалося виконати власне розбиття train/test: %s", e)
             sys.exit(2)
@@ -322,6 +347,8 @@ def main():
             logger.info("Звіт про класифікацію:\n%s", report)
             logger.info("Матриця помилок:\n%s", conf_matrix)
             if plotting_enabled:
+                import matplotlib.pyplot as plt
+                from sklearn.metrics import ConfusionMatrixDisplay
                 disp = ConfusionMatrixDisplay(confusion_matrix=conf_matrix, display_labels=['Ham', 'Spam'])
                 disp.plot(cmap=plt.cm.Blues)
                 plt.title(f'Матриця помилок для {name}')
@@ -331,10 +358,8 @@ def main():
     else:
         # Проста резервна реалізація Multinomial Naive Bayes без sklearn
         logger.info("Скикит-лерн недоступний — запускаємо спрощений вбудований класифікатор Multinomial Naive Bayes.")
-        # Токенізація: розбиття за пробілами (повідомлення вже попередньо очищені)
         def tokenize(text):
             return [t for t in str(text).split() if t]
-        # Побудова словника
         vocab = {}
         def add_to_vocab(tokens):
             for tok in tokens:
@@ -344,7 +369,6 @@ def main():
             add_to_vocab(tokenize(msg))
         V = len(vocab)
         alpha = 1.0  # Лапласове згладжування
-        # Лічильники слів за класами
         total_words = {0: 0, 1: 0}
         word_counts = {0: np.zeros(V, dtype=np.int64), 1: np.zeros(V, dtype=np.int64)}
         class_counts = {0: 0, 1: 0}
@@ -356,51 +380,37 @@ def main():
                 if j is not None:
                     word_counts[c][j] += 1
                     total_words[c] += 1
-        # Априорні ймовірності класів
         n_train = len(y_train)
         priors = {0: (class_counts[0] / n_train if n_train else 0.5), 1: (class_counts[1] / n_train if n_train else 0.5)}
-        # Попередньо обчислені лог-імовірності слів та невідомих слів
         log_probs = {0: None, 1: None}
         default_log_prob = {}
         for c in [0, 1]:
             denom = total_words[c] + alpha * V if V > 0 else 1.0
             probs_c = (word_counts[c] + alpha) / denom
-            # уникати лог(0)
             probs_c = np.maximum(probs_c, 1e-12)
             log_probs[c] = np.log(probs_c)
             default_log_prob[c] = math.log(alpha / denom) if denom > 0 else math.log(1e-12)
         log_prior = {0: math.log(max(priors[0], 1e-12)), 1: math.log(max(priors[1], 1e-12))}
-        # Функція прогнозу для одного повідомлення
         def predict_one(msg):
-            lp0 = log_prior[0]
-            lp1 = log_prior[1]
+            lp0 = log_prior[0]; lp1 = log_prior[1]
             for tok in tokenize(msg):
                 j = vocab.get(tok)
                 if j is None:
-                    lp0 += default_log_prob[0]
-                    lp1 += default_log_prob[1]
+                    lp0 += default_log_prob[0]; lp1 += default_log_prob[1]
                 else:
-                    lp0 += float(log_probs[0][j])
-                    lp1 += float(log_probs[1][j])
+                    lp0 += float(log_probs[0][j]); lp1 += float(log_probs[1][j])
             return 1 if lp1 > lp0 else 0
-        # Прогноз на тесті
         y_pred = [predict_one(msg) for msg in X_test]
-        # Оцінка якості
         def confusion(y_true, y_hat):
             tn = fp = fn = tp = 0
             for yt, yp in zip(y_true, y_hat):
-                if int(yt) == 1 and int(yp) == 1:
-                    tp += 1
-                elif int(yt) == 0 and int(yp) == 0:
-                    tn += 1
-                elif int(yt) == 0 and int(yp) == 1:
-                    fp += 1
-                else:
-                    fn += 1
+                if int(yt) == 1 and int(yp) == 1: tp += 1
+                elif int(yt) == 0 and int(yp) == 0: tn += 1
+                elif int(yt) == 0 and int(yp) == 1: fp += 1
+                else: fn += 1
             return np.array([[tn, fp], [fn, tp]], dtype=int)
         conf_matrix = confusion(y_test, y_pred)
         accuracy = float((conf_matrix[0,0] + conf_matrix[1,1]) / max(1, conf_matrix.sum()))
-        # Мінімальний звіт
         def pr_re_f1(cm, pos):
             tn, fp, fn, tp = cm[0,0], cm[0,1], cm[1,0], cm[1,1]
             if pos == 1:
